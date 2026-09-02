@@ -4,7 +4,9 @@ A location-neutral pitch-quality model built with Cape Cod Baseball League Track
 
 This project started with a practical question: **how much does the physical quality of a pitch contribute to its ability to miss bats after removing where it was thrown?** The model estimates that contribution, converts it to a familiar Stuff+ scale, and produces reports that can be used for pitcher evaluation and player development.
 
-The model was developed on 2025 data and evaluated on the untouched 2026 season. A score of **100 represents league average**, and every 10 points represents approximately one standard deviation above or below the relevant CCBL reference group. \[Read the full model breakdown](reports/CCBL\_StuffPlus\_Model\_Report.pdf)
+The model was developed on 2025 data and evaluated on the untouched 2026 season. A score of **100 represents league average**, and every 10 points represents approximately one standard deviation above or below the relevant CCBL reference group.
+
+[Read the full model breakdown](reports/CCBL_StuffPlus_Model_Report.pdf)
 
 ## Key result
 
