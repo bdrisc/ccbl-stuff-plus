@@ -1,0 +1,20 @@
+# Private TrackMan data
+data/raw/
+
+# Generated model files
+outputs/
+*.joblib
+*.pkl
+
+# Excel files
+*.xlsx
+*.xls
+
+# Jupyter and Python temporary files
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# Operating-system files
+.DS_Store
+Thumbs.db
