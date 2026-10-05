@@ -2,180 +2,143 @@
 
 A location neutral pitch quality model built with Cape Cod Baseball League TrackMan data from the 2025 and 2026 seasons.
 
-This project started with a practical question: **how much does the physical quality of a pitch contribute to its ability to miss bats after removing where it was thrown?** The model estimates that contribution, converts it to a familiar Stuff+ scale, and produces reports that can be used for pitcher evaluation and player development.
+The model estimates whiff probability on swings from pitch characteristics, evaluates those predictions at a fixed grid of plate locations and both batter sides, and converts the resulting location neutral estimates to Stuff+. A score of **100 represents the 2025 pitch type and pitcher hand reference average**, with 10 points corresponding to approximately one reference standard deviation on the log odds scale before clipping and summary shrinkage.
 
-The model was developed on 2025 data and evaluated on the untouched 2026 season. A score of **100 represents league average**, and every 10 points represents approximately one standard deviation above or below the relevant CCBL reference group.
+**Current version: `CCBL-StuffPlus-G-v1.0`.** G retains the original velocity, movement, spin, release, extension, and adjusted angle features and adds measured flight time and fitted along-flight deceleration. It trains on 2025 data. The 2026 evaluation is **exploratory** because those results were examined during the comparison of model versions.
 
-[Read the full model breakdown](reports/CCBL_StuffPlus_Model_Report.pdf)
+## Results
 
-## Key result
+On 23,811 development swings from 321 pitchers, the G model improved pitcher-held-out 2025 log loss over the context-only model by **0.004901**, with a pitcher-clustered 95% bootstrap interval of **0.002571 to 0.007429**. The overall publication gate passed.
 
-During pitcher held out validation on the 2025 development sample, the full pitch characteristics model improved log loss over a context only baseline by **0.00374**. A pitcher clustered bootstrap produced a 95% interval of **0.00149 to 0.00634**, allowing the global publication gate to pass.
+The separate comparison with the original model used the same manually classified sample and pitcher-held-out folds:
 
-That improvement is modest, which is expected when comparing against a baseline that already knows pitch type, handedness, batter side, and plate location. More importantly, the interval remained above zero when entire pitchers were held out. This suggests that the measured pitch characteristics added information beyond context alone rather than simply memorizing the pitchers used for training.
+| Raw actual-location log loss | Original model | G |
+| --- | ---: | ---: |
+| 2025 pitcher-held-out validation | 0.491338 | 0.490179 |
+| 2026 exploratory forward evaluation | 0.504650 | 0.502322 |
 
-## What the model does
+Lower log loss is better. The gain over the context-only model and the gain over the original full model are different comparisons. Additional 2025 fold assignments had positive point estimates in all three repeats, with positive 95% intervals in two. These repeats reuse the same development data and are not independent confirmation. Fresh data is needed to independently test the selected G model.
 
-The pipeline predicts the probability of a whiff on a swing using an XGBoost classifier. It compares two models:
+The packaged run scores **110,138 eligible pitches**: 53,927 from 2025 and 56,211 from 2026. The new time and fitted trajectory features had complete coverage on this prepared sample. See [G model details](docs/g-model.md) for feature definitions, validation, and limitations.
 
-* **Context model:** pitch type, pitcher handedness, batter side, and plate location
-* **Full model:** the context variables plus velocity, movement, spin, release traits, extension, flight characteristics, and location-adjusted release and approach angles
+## How scoring works
 
-The full model is then evaluated across a fixed set of plate locations and both batter sides. Averaging those counterfactual predictions removes the effect of the pitch's actual location and creates a location neutral estimate of its bat missing quality.
+The pipeline fits two XGBoost classifiers on swings:
 
-Those estimates are standardized within pitch type and pitcher hand reference groups on the log odds scale:
+- **Context:** pitch type, pitcher hand, batter side, and plate location.
+- **Full:** context plus the measured and derived pitch characteristics.
 
-* `100` = league average
-* `110` = approximately one standard deviation above average
-* `90` = approximately one standard deviation below average
+Five-fold `GroupKFold` validation holds out whole pitchers. Preprocessing and angle adjustment are fitted within each training fold. The pipeline exports log loss, ROC AUC, PR AUC, Brier score, calibration diagnostics, pitcher-clustered intervals, and feature drift checks. Cross-fitted Platt scaling is a secondary calibration diagnostic; it is not a fully nested base-model/calibrator validation. Holdout calibration uses only 2025 out-of-fold predictions.
 
-Pitcher and arsenal summaries are partially shrunk toward 100 when the sample is small. This prevents a handful of pitches from producing an overly confident ranking.
+The full model is scored over nine fixed plate locations and both batter sides. Measured flight time and deceleration remain fixed during this averaging; no hypothetical trajectory is reconstructed. The resulting neutral probabilities are standardized against 2025 pitch type and pitcher hand references. Pitch-level scores are clipped to 40–160. Summary scores shrink toward 100 using 30 reference pitches.
 
-## Validation design
+## Validation tiers
 
-The validation process was designed to resemble how the model would perform on pitchers and data it had not previously seen.
+Every pitch type and pitcher hand combination is scored, including groups that fail publication gates. Keep the tier alongside the score.
 
-1. The pipeline trains on swings from the 2025 CCBL season.
-2. Five fold `GroupKFold` validation holds out entire pitchers rather than random pitches.
-3. Feature preparation and angle adjustments are fitted separately inside each training fold.
-4. Cross fitted Platt scaling is used to calibrate predicted whiff probabilities.
-5. The full model is compared directly with the context only baseline using log loss, ROC AUC, PR AUC, Brier score, and calibration error.
-6. Pitcher clustered bootstrap intervals measure uncertainty in incremental performance.
-7. The completed model is evaluated on 2026 as a forward holdout that was not used during development.
+| Tier | Groups in the G run | Report code |
+| --- | --- | --- |
+| Published | Four-Seam, Left/Right; Two-Seam, Right | V |
+| Pooled-Supported | Sinker, Left/Right; Slider, Left/Right; Splitter, Left | P |
+| Rejected | Changeup, Left/Right; Curveball, Left/Right; Cutter, Left/Right; Splitter, Right; Two-Seam, Left | D |
 
-## Publication tiers
+Published groups passed the strict 2025 group confidence gates under the pooled model. Pooled-Supported groups had positive group estimates but inconclusive confidence intervals. Rejected groups are diagnostic only. A rejection indicates insufficient validation for that group, not that an individual pitch is poor.
 
-Pitch groups are not treated as equally reliable. Each pitch type and pitcher hand combination receives a tier based on sample size, out of fold performance, uncertainty, and holdout diagnostics.
-
-|Tier|Pitch groups from this run|
-|-|-|
-|**Published**|Four-Seam — Left; Four-Seam — Right|
-|**Pooled Supported**|Curveball — Left; Sinker — Left/Right; Slider — Left/Right; Splitter — Left; Two-Seam — Right|
-|**Rejected**|Changeup — Left/Right; Curveball — Right; Cutter — Left/Right; Splitter — Right; Two-Seam — Left|
-
-`Published` groups passed the strict group level confidence gates. `Pooled Supported` groups had positive estimates under the globally validated model, but their individual confidence intervals were still inconclusive. `Rejected` groups remain available in the scoring output, but their group level results should not be presented as independently validated findings.
-
-Sweepers are included with sliders because the manually reviewed `MyPitchType` field used in this project classifies them as sliders.
-
-## Example outputs
-
-### Individual pitcher report
-
-The pitcher report summarizes overall and pitch specific Stuff+ while showing how each pitch performed throughout the selected outings.
-
-!\[Example individual pitcher Stuff+ report](examples/Pitcher\_Report.png)
-
-### Team ranking
-
-The team graphic compares the top and bottom qualified Falmouth pitchers using shrinkage adjusted overall Stuff+.
-
-!\[Example Falmouth pitcher Stuff+ rankings](examples/Team\_Rankings.png)
-
-## Features
-
-The full model uses measured TrackMan variables and a small number of transparent derived features:
-
-* Release speed and zone speed
-* Spin rate and circularly encoded spin axis
-* Induced vertical break and horizontal break
-* Movement magnitude
-* Release height and release side
-* Extension and effective velocity
-* Velocity loss from release to the plate
-* Location adjusted vertical and horizontal release angles
-* Location adjusted vertical and horizontal approach angles
-* Pitch type, pitcher handedness, batter side, and plate location
-
-The project does not label movement based proxies as measured spin efficiency, active spin, or gyro spin. Those labels were intentionally excluded because the required measurements were not available in the dataset.
-
-## Repository structure
-
-```text
-ccbl-stuff-plus/
-├── assets/                 # Logos used in the report graphics
-├── data/
-│   └── raw/                # Private TrackMan workbook; not committed
-├── examples/               # Portfolio-ready report graphics
-├── notebooks/
-│   └── CCBL\_StuffPlus\_Model.ipynb
-├── outputs/                # Generated scores and saved models; not committed
-├── reports/                # Written model breakdown
-├── .gitignore
-├── README.md
-└── requirements.txt
-```
+The model requires manually reviewed **`MyPitchType`** labels. It does not fill blank model labels from `TaggedPitchType` or `AutoPitchType`. Reports may use `TaggedPitchType` for display, so a displayed arsenal category can contain more than one model category; its validation code uses the weakest included tier. Sweepers remain within the reviewed slider category.
 
 ## Running the project
 
-### 1\. Install the dependencies
-
-From the repository root, run:
+Install dependencies from the repository root:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 2\. Add the private data locally
-
-Place the combined workbook here:
+Place your authorized, private workbook at:
 
 ```text
 data/raw/2025 CCBL Trackman Data.xlsx
 ```
 
-Despite its filename, this workbook contains both 2025 and 2026 pitches. The notebook assigns season using the `Date` column.
+Despite the filename, the development workbook includes both seasons; `Date` determines season. Raw data and generated model files are excluded from Git.
 
-The raw data is intentionally excluded from this repository. A user must have an authorized TrackMan export with the required fields to reproduce the complete analysis.
+Open `notebooks/CCBL_StuffPlus_Model.ipynb`. Defaults are portable:
 
-### 3\. Add the report assets
-
-Place the logo files here:
-
-```text
-assets/Falmouth\_Commodores\_Logo.png
-assets/Dores\_Analytics\_Logo.png
+```python
+DATA_FILE_OVERRIDE: str | Path | None = None
+RUN_MODEL = True
+G_RUN_DIRECTORY: Path | None = None
 ```
 
-### 4\. Run the notebook
+You can set `CCBL_TRACKMAN_FILE` or `DATA_FILE_OVERRIDE` to another workbook. An explicit override takes priority and must exist. Required G inputs include `ZoneTime` in seconds, `HorzBreak` and `InducedVertBreak` in inches, and legacy `ax0`, `ay0`, `az0`, `vx0`, `vy0`, `vz0`, and `y0` in imperial units. Invalid G source measurements stop fitting rather than silently dropping prepared pitches.
 
-Open:
+Set the pitcher, report dates, team, and minimum pitch count near the top, then select **Run All**. Logos are optional:
 
 ```text
-notebooks/CCBL\_StuffPlus\_Model.ipynb
+assets/Falmouth_Commodores_Logo.png
+assets/Dores_Analytics_Logo.png
 ```
 
-Leave `DATA\_FILE\_OVERRIDE = None` when using the repository structure, confirm the run and report settings near the top of the notebook, and select **Run All**.
+Each fit creates a new UTC timestamped directory:
 
-The pipeline writes model diagnostics, pitch scores, pitcher summaries, calibration tables, feature drift checks, audit tables, and saved model objects to `outputs/`. It writes the two portfolio graphics to `examples/`.
+```text
+outputs/stuffplus_g_v1/run_<timestamp>/
+  StuffPlus_G_AllPitchScores.xlsx
+  StuffPlus_G_models.joblib
+  StuffPlus_G_report_data.joblib
+  StuffPlus_G_manifest.json
+  reports/
+    Pitcher_Report_G.png
+    Team_Rankings_G.png
+    Pitcher_Validation_G.csv
+    Team_Validation_G.csv
+```
+
+To regenerate reports without retraining, select the completed run:
+
+```python
+RUN_MODEL = False
+G_RUN_DIRECTORY = OUTPUT_DIR / "stuffplus_g_v1" / "run_<your_completed_timestamp>"
+```
+
+Change report settings and run all cells. The notebook loads the saved scores, checks the model version, and rebuilds the graphics. Existing model outputs cannot be overwritten by a new fit into the same folder. Only load trusted Joblib files.
+
+Individual report tables and charts use the same pitch-type shrinkage adjustment. Charts intentionally combine selected outings. The report headline and team graphic pool all pitch scores before applying one overall shrinkage adjustment; the workbook's `OverallStuffPlus` instead averages already-shrunk arsenal scores. These aggregations can differ. Neither calculation is a percentage improvement in performance.
+
+## Examples and earlier research
+
+The existing portfolio graphics and PDF describe the earlier model; they are historical examples, not G results. Your G graphics are generated in the selected run's `reports/` folder.
+
+![Earlier individual pitcher report](examples/Pitcher_Report.png)
+
+![Earlier Falmouth team rankings](examples/Team_Rankings.png)
+
+[Earlier model breakdown](reports/CCBL_StuffPlus_Model_Report.pdf) · [Acceleration experiment history](docs/acceleration-experiment.md)
+
+The current notebook fits only G. It does not run the earlier A–I ablations or repeated robustness comparisons.
+
+## Checks
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
+Tests use synthetic TrackMan-like data, so no private workbook is required. They cover source physics, the manual-label policy, invalid-input stops, pitcher folds, holdout-outcome isolation, cache/version handling, report generation, and chart/table shrinkage consistency. GitHub Actions runs these checks on pushes and pull requests.
 
 ## Limitations
 
-* The model is trained on CCBL data, so its scale and relationships should not be assumed to transfer directly to other leagues.
-* Whiff probability captures one important part of pitch quality, but it does not measure called strike value, contact quality, command, sequencing, deception, durability, or pitcher intent.
-* Location neutral scoring depends on a defined grid of counterfactual locations rather than every possible game situation.
-* Several pitch type and handedness groups did not pass strict group level confidence gates.
-* TrackMan classifications and measurements can contain tagging errors or missing values.
-* The 2026 holdout revealed calibration or incremental value concerns for some groups, which are retained in the diagnostics instead of being hidden.
+- The model is trained on CCBL data; transfer to another league needs validation.
+- Whiff-on-swing quality does not directly measure called strike value, contact quality, command, sequencing, durability, or pitcher intent.
+- Fixed-location averaging does not simulate every game situation or remove every possible link between location and the measured features.
+- Fitted deceleration is an approximation from the average fitted trajectory. A predictive gain does not prove late break, pure Magnus force, or a causal pitch-design benefit.
+- Several pitch groups lack strong group-level support. Left-handed curveballs and splitters also had 2026 calibration review flags.
+- The 2026 evaluation has already informed model comparisons. Use fresh data for independent confirmation.
 
-Stuff+ should therefore be treated as one piece of a broader evaluation that also includes command, results, video, health, role, and scouting observations.
-
-## Tools
-
-Python, pandas, NumPy, scikit-learn, XGBoost, Matplotlib, Joblib, and OpenPyXL.
+Use Stuff+ alongside scouting, video, command, results, health, and role.
 
 ## Author
 
-**Brendan Driscoll**  
-Baseball Operations \& Analytics  
+**Brendan Driscoll**
+Baseball Operations & Analytics
 [GitHub](https://github.com/bdrisc) · [Portfolio](https://evanescent-iris-6be.notion.site/Brendan-Driscoll-s-Portfolio-2b56c3f280ac808ebda4c1b6e66d46ba)
-
-The data used in this project is proprietary and is not included in the public repository.
-
-
-## Acceleration experiment
-
-The notebook includes an optional paired comparison of the current movement features, equivalent acceleration features, and their combination. A fourth variant adds only flight time as a timing control. The experiment uses documented TrackMan `ZoneTime`, identical pitcher-held-out folds and comparison samples, paired uncertainty intervals, and separate research outputs. It does not automatically replace published Stuff+ scores.
-
-[Run and interpret the acceleration experiment](docs/acceleration-experiment.md).
-
-The next acceleration comparison adds fitted transverse acceleration from legacy TrackMan `ax0/ay0/az0` and velocity fields, plus a flight-time/deceleration control. `INCLUDE_FITTED_ACCELERATION = True` runs seven variants on one common sample; see [the experiment guide](docs/acceleration-experiment.md) for inputs and interpretation.

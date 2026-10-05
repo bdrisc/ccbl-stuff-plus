@@ -1,4 +1,12 @@
-# Acceleration versus movement experiment
+# Acceleration experiment history
+
+This page records the earlier A–G research workflow. It is **not an instruction for the current notebook**: G v1.0 fits only the selected model, and the experiment flags and ablation runner below are no longer present. For current inputs, output paths, and report reuse, read the [README](../README.md) and [G model guide](g-model.md).
+
+The previous implementation is preserved at [commit eae1e08](https://github.com/bdrisc/ccbl-stuff-plus/tree/eae1e08). Its fallback label policy differed from the final manual-only comparison sample. The later fixed-sample time/deceleration and challenger validation were run in separate research notebooks; those artifacts are not included in this repository. The current model requires `MyPitchType` and does not use automatic labels as replacements.
+
+---
+
+# Earlier acceleration versus movement experiment
 
 The notebook now tests whether time-normalized movement improves whiff-on-swing prediction. Existing Stuff+ scores, model bundles, publication tiers, and pitcher reports retain the current model. Experimental outputs live in a separate, timestamped folder.
 
