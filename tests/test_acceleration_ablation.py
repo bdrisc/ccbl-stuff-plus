@@ -176,3 +176,31 @@ def test_missing_time_skips_with_audit(model_namespace, tmp_path):
 
 def test_constant_rank_is_undefined_without_warning(model_namespace):
     assert np.isnan(model_namespace["acceleration_safe_correlation"](pd.Series([0.5, 0.5]), pd.Series([0.1, 0.3])))
+
+
+@pytest.mark.parametrize("column", ["TaggedPitchType", "AutoPitchType"])
+def test_missing_manual_pitch_type_uses_available_source(model_namespace, column):
+    data = synthetic_trackman().rename(columns={"MyPitchType": column})
+    with pytest.warns(UserWarning, match="MyPitchType is absent or blank"):
+        prepared, audit, _ = model_namespace["prepare_data"](data, model_namespace["SETTINGS"], pd.DataFrame())
+    assert len(prepared) == len(data)
+    assert prepared["PitchType"].eq("Slider").all()
+    assert prepared["PitchTypeSource"].eq(column).all()
+    assert column in set(audit["Detail"])
+
+
+def test_manual_priority_blank_fallback_and_unsupported_labels(model_namespace):
+    data = synthetic_trackman().iloc[:4].copy()
+    data["TaggedPitchType"] = "Curveball"
+    data["AutoPitchType"] = "Sinker"
+    data["MyPitchType"] = ["Slider", "", None, "Other"]
+    with pytest.warns(UserWarning):
+        prepared, _, _ = model_namespace["prepare_data"](data, model_namespace["SETTINGS"], pd.DataFrame())
+    assert prepared["PitchType"].tolist() == ["Slider", "Curveball", "Curveball"]
+    assert prepared["PitchTypeSource"].tolist() == ["MyPitchType", "TaggedPitchType", "TaggedPitchType"]
+
+
+def test_no_pitch_type_source_is_actionable(model_namespace):
+    data = synthetic_trackman().drop(columns="MyPitchType")
+    with pytest.raises(ValueError, match="No pitch-type source was found"):
+        model_namespace["prepare_data"](data, model_namespace["SETTINGS"], pd.DataFrame())

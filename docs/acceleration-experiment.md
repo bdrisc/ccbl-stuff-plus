@@ -63,3 +63,9 @@ Each run writes its own directory, preserving previous comparisons and avoiding 
 - `acceleration_logloss.png`: overview of raw comparison log loss.
 
 All player-level data and generated outputs remain excluded from Git. The experiment does not overwrite the original score/report artifacts or automatically promote a winning variant.
+
+## Workbooks without MyPitchType
+
+The loader prefers `MyPitchType`, then fills absent/blank labels from `TaggedPitchType`, then `AutoPitchType`. Nonblank reviewed labels are never overridden; unsupported reviewed labels still follow the existing eligibility exclusions. If no pitch-type source exists, the loader lists the available columns and stops with an actionable error.
+
+Fallback classifications produce an explicit warning. The original validation workbook's data audit and the experiment's `Data Audit` sheet and provenance JSON record source counts. The four variants still use the same classifications and samples within a run, but results from an automatically tagged workbook should not be treated as directly interchangeable with earlier manually classified results. Review labels before publication.
