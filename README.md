@@ -171,3 +171,9 @@ Baseball Operations \& Analytics
 
 The data used in this project is proprietary and is not included in the public repository.
 
+
+## Acceleration experiment
+
+The notebook includes an optional paired comparison of the current movement features, equivalent acceleration features, and their combination. A fourth variant adds only flight time as a timing control. The experiment uses documented TrackMan `ZoneTime`, identical pitcher-held-out folds and comparison samples, paired uncertainty intervals, and separate research outputs. It does not automatically replace published Stuff+ scores.
+
+[Run and interpret the acceleration experiment](docs/acceleration-experiment.md).
