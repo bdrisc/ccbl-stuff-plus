@@ -109,16 +109,21 @@ def synthetic_trackman():
                     "SpinAxis": 90, "InducedVertBreak": -5 + rng.normal(),
                     "HorzBreak": 12 + rng.normal(), "RelHeight": 6, "RelSide": -2,
                     "Extension": 6, "ZoneSpeed": 75, "EffectiveVelo": 83,
+                    "ax0": 10 + rng.normal(), "ay0": 25, "az0": -35 + rng.normal(),
+                    "vx0": 2, "vy0": -120, "vz0": -4, "y0": 50,
                     "ZoneTime": 0.44 + rng.normal() * 0.01, "PlateLocHeight": rng.uniform(1, 4),
                     "PlateLocSide": rng.uniform(-1, 1), "VertRelAngle": -2 + rng.normal() * .1,
                     "HorzRelAngle": 2 + rng.normal() * .1, "VertApprAngle": -6 + rng.normal() * .1, "HorzApprAngle": 3 + rng.normal() * .1})
     return pd.DataFrame(rows)
 
 
-def test_full_experiment_common_sample_folds_and_outputs(model_namespace, tmp_path):
+@pytest.mark.parametrize("include_fitted", [False, True])
+def test_full_experiment_common_sample_folds_and_outputs(model_namespace, tmp_path, include_fitted):
     data = synthetic_trackman()
     # Missing flight time excludes the SAME rows from every variant.
     data.loc[[0, 150], "ZoneTime"] = np.nan
+    if include_fitted:
+        data.loc[2, "az0"] = np.nan
     source = tmp_path / "synthetic.xlsx"
     data.to_excel(source, index=False)
     settings = replace(model_namespace["SETTINGS"], max_cv_folds=2, bootstrap_iterations=25,
@@ -130,22 +135,26 @@ def test_full_experiment_common_sample_folds_and_outputs(model_namespace, tmp_pa
         return pipeline
     model_namespace["make_model_pipeline"] = fast_factory
     output_dir = tmp_path / "comparison"
-    result = model_namespace["run_acceleration_ablation"]([source], output_dir, settings=settings)
+    result = model_namespace["run_acceleration_ablation"]([source], output_dir, settings=settings, include_fitted=include_fitted)
     assert result["status"] == "Completed"
     output_dir = result["output_directory"]
     prediction = result["predictions"]
-    assert len(prediction) == len(data) - 2
+    assert len(prediction) == len(data) - 2 - int(include_fitted)
     assert prediction.filter(regex="_Raw$").notna().all().all()
     oof = prediction[prediction["Split"] == "2025_OOF"]
     assert oof.groupby("Pitcher")["Fold"].nunique().eq(1).all()
     assert set(oof["Fold"]) == {1, 2}
-    assert result["provenance"]["lowest_development_logloss_variant"] in model_namespace["acceleration_feature_sets"]()
+    assert result["provenance"]["lowest_development_logloss_variant"] in model_namespace["acceleration_feature_sets"](include_fitted)
     assert result["provenance"]["status"] == "Completed"
     assert "2026_Exploratory" in set(prediction["Split"])
-    assert len(result["metrics"].query("Scope == 'Overall'")) == 16
+    assert len(result["metrics"].query("Scope == 'Overall'")) == (28 if include_fitted else 16)
     assert (output_dir / "Acceleration_Ablation.xlsx").exists()
     assert (output_dir / "acceleration_research_models.joblib").exists()
     assert (output_dir / "acceleration_logloss.png").exists()
+    if include_fitted:
+        assert (output_dir / "fitted_pitch_features.csv").exists()
+        pairs = result["comparisons"]
+        assert ((pairs.Baseline == "G_TimeDragControl") & (pairs.Candidate == "F_FittedCombined")).any()
     # Holdout outcomes cannot influence development predictions or selection.
     altered = data.copy()
     held_mask = altered["Date"].str.startswith("2026")
@@ -154,7 +163,7 @@ def test_full_experiment_common_sample_folds_and_outputs(model_namespace, tmp_pa
         "FoulBallFieldable", "StrikeSwinging")
     altered_source = tmp_path / "altered_holdout.xlsx"
     altered.to_excel(altered_source, index=False)
-    second = model_namespace["run_acceleration_ablation"]([altered_source], tmp_path / "comparison", settings=settings)
+    second = model_namespace["run_acceleration_ablation"]([altered_source], tmp_path / "comparison", settings=settings, include_fitted=include_fitted)
     second_oof = second["predictions"].query("Split == '2025_OOF'")
     np.testing.assert_allclose(oof.filter(regex="_Raw$").to_numpy(), second_oof.filter(regex="_Raw$").to_numpy())
     assert result["provenance"]["lowest_development_logloss_variant"] == second["provenance"]["lowest_development_logloss_variant"]
@@ -204,3 +213,53 @@ def test_no_pitch_type_source_is_actionable(model_namespace):
     data = synthetic_trackman().drop(columns="MyPitchType")
     with pytest.raises(ValueError, match="No pitch-type source was found"):
         model_namespace["prepare_data"](data, model_namespace["SETTINGS"], pd.DataFrame())
+
+
+def fitted_frame():
+    data = frame([0.4] * 4)
+    data = data.assign(ax0=10.0, ay0=25.0, az0=-27.174, vx0=2.0, vy0=-120.0, vz0=-4.0, y0=50.0)
+    return data
+
+
+def test_fitted_gravity_projection_and_coordinate_sign(model_namespace):
+    data = fitted_frame()
+    data.loc[0, ["ax0", "ay0", "az0"]] = [0, 0, -32.174]
+    data.loc[1, "ax0"] = -10
+    out, audit, reason = model_namespace["prepare_fitted_acceleration_features"](data)
+    assert reason == "" and out["FittedEligible"].all()
+    np.testing.assert_allclose(out.loc[0, model_namespace["FITTED_ACCELERATION_FEATURES"]].astype(float), 0, atol=1e-12)
+    assert out.loc[1, "FittedTransverseX"] < 0
+    a = data[["ax0", "ay0", "az0"]].to_numpy()
+    v = data[["vx0", "vy0", "vz0"]].to_numpy() + a * out["FittedIntervalTime"].to_numpy()[:, None] / 2
+    unit = v / np.linalg.norm(v, axis=1)[:, None]
+    aero = a + [0, 0, 32.174]
+    parallel = (aero * unit).sum(axis=1)
+    expected = aero - parallel[:, None] * unit
+    np.testing.assert_allclose(out["FittedTransverseX"], expected[:, 0])
+    np.testing.assert_allclose(out["FittedTransverseZ"], expected[:, 2])
+    np.testing.assert_allclose(out["FittedDragDeceleration"], -parallel)
+    np.testing.assert_allclose(out["FittedOrthogonalityResidual"], 0, atol=1e-12)
+    t = out["FittedIntervalTime"]
+    np.testing.assert_allclose(data.y0 + data.vy0 * t + .5 * data.ay0 * t**2, 17/12)
+    assert audit["ValidRows"].sum() == len(data)
+
+
+def test_fitted_invalid_and_missing_sources(model_namespace):
+    data = fitted_frame()
+    data.loc[0, "vx0"] = np.inf
+    data.loc[1, "vy0"] = 120
+    data.loc[2, "y0"] = 0
+    out, _, reason = model_namespace["prepare_fitted_acceleration_features"](data)
+    assert not reason
+    assert out["FittedEligible"].tolist() == [False, False, False, True]
+    _, _, reason = model_namespace["prepare_fitted_acceleration_features"](data.drop(columns="az0"))
+    assert "az0" in reason
+
+
+def test_fitted_missing_columns_skips_explicitly(model_namespace, tmp_path):
+    source = tmp_path / "without_fitted.xlsx"
+    synthetic_trackman().drop(columns="ax0").to_excel(source, index=False)
+    result = model_namespace["run_acceleration_ablation"]([source], tmp_path / "comparison", include_fitted=True)
+    assert result["status"] == "Skipped"
+    assert "ax0" in result["reason"]
+    assert (result["output_directory"] / "fitted_acceleration_audit.csv").exists()

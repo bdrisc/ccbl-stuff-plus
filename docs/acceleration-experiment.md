@@ -6,7 +6,7 @@ The notebook now tests whether time-normalized movement improves whiff-on-swing 
 
 1. Pull the repository updates and open `notebooks/CCBL_StuffPlus_Model.ipynb`.
 2. Keep your combined 2025/2026 private workbook in the existing location, or set `DATA_FILE_OVERRIDE` as before.
-3. Run all cells. `RUN_ACCELERATION_EXPERIMENT = True` enables the experiment. The original `RUN_MODEL` option still controls the existing Stuff+ pipeline. To rerun only the comparison after generating the original reports once, set `RUN_MODEL = False`.
+3. Keep `INCLUDE_FITTED_ACCELERATION = True` for the next seven-variant comparison. Set it to `False` to reproduce the first four-variant experiment. Run all cells. `RUN_ACCELERATION_EXPERIMENT = True` enables the experiment. The original `RUN_MODEL` option still controls the existing Stuff+ pipeline. To rerun only the comparison after generating the original reports once, set `RUN_MODEL = False`.
 4. Inspect the printed metrics and `outputs/acceleration_ablation/run_<UTC timestamp>/Acceleration_Ablation.xlsx`.
 
 No new modeling dependency is required. Tests use `python -m pip install -r requirements-dev.txt`, then `python -m pytest tests -q`.
@@ -35,10 +35,32 @@ The timestamp `Time` is never treated as flight time. No velocity-based estimate
 | B_Acceleration | Replace IVB, HB, and movement magnitude with signed equivalent accelerations and their magnitude |
 | C_Combined | Original features plus the three acceleration features |
 | D_CurrentPlusTime | Original features plus valid flight time |
+| E_FittedReplacement | Replace IVB, HB, and movement magnitude with fitted transverse x/z acceleration and full transverse magnitude |
+| F_FittedCombined | Original features plus those three fitted transverse features |
+| G_TimeDragControl | Original features plus flight time and fitted deceleration along the velocity vector |
 
 D is a timing control: C versus D tests whether the acceleration representation helps beyond simply adding the time used to calculate it. Acceleration is a deterministic transformation of break and time, so a gain does not establish a new independent physical signal.
 
-Velocity, spin, release traits, extension, and location-adjusted angles stay in all variants. All four use the same complete-case swings, the same pitcher-held-out 2025 folds, the same XGBoost settings, and fold-fitted angle adjustments and preprocessing. This common sample can differ from the full published model's sample: read coverage before generalizing.
+Velocity, spin, release traits, extension, and location-adjusted angles stay in all variants. All enabled variants use the same complete-case swings, the same pitcher-held-out 2025 folds, the same XGBoost settings, and fold-fitted angle adjustments and preprocessing. This common sample can differ from the full published model's sample: read coverage before generalizing.
+
+## Fitted acceleration comparison
+
+The next comparison uses legacy nine-parameter `ax0`, `ay0`, `az0`, `vx0`, `vy0`, `vz0`, and `y0`. Inputs must be imperial: ft/s², ft/s, and feet. In this legacy representation, x is lateral, y points toward the mound (pitch velocity is negative), and z is up. The default reference is y0 = 50 ft. These are **different axes from the PitchTrajectoryX/Y/Z polynomial fields**; no substitutions are made.
+
+Let a be the fitted acceleration and v the midpoint velocity between y0 and the front of home plate (y = 17/12 ft). The code solves the constant-acceleration y trajectory for that interval and evaluates v at half its travel time. With g = 32.174 ft/s²:
+
+- Gravity-removed aerodynamic acceleration: `a_air = a + [0, 0, g]`.
+- Along-flight acceleration: `a_parallel = dot(a_air, v / norm(v))`.
+- Approximate transverse acceleration: `a_transverse = a_air - a_parallel * v / norm(v)`.
+- Fitted drag deceleration: `-a_parallel` (positive means slowing).
+
+This projection follows the velocity-parallel drag approximation described by Alan Nathan: https://baseball.physics.illinois.edu/Movement.pdf. It approximates transverse aerodynamic acceleration from an average fitted trajectory; it is not an independent instantaneous force measurement, pure Magnus measurement, or evidence of late break. Fitted and equivalent features use different intervals and definitions. Keep the fitted x sign native; do not relabel it as signed HorzBreak. The user's sample has opposite HB and ax0 signs. The `Fitted Audit` sheet reports x-versus-HB and z-versus-IVB correlations without learning or applying a sign flip.
+
+All seven variants are refit on the intersection of valid break/time and fitted inputs. Invalid or missing rows are excluded from **every** variant, and Sample Coverage reports the resulting loss. Missing fitted columns cause a skipped run with an explicit audit rather than silently reverting to A–D. Set `INCLUDE_FITTED_ACCELERATION = False` if intentionally rerunning A–D. Finite inputs, plate-directed velocity, positive travel distance/time, and plausible midpoint speed (50–200 ft/s) are required. Negative fitted drag is flagged in the audit rather than clipped.
+
+The paired table now includes E versus B, F versus C, F versus D, and F versus G. These distinguish fitted acceleration from equivalent acceleration and from the flight-time/deceleration control. B versus D is also included to examine the earlier right-handed cutter result. All pitch-type/hand rows are exported; cutter/Right, slider/Left, splitter/Right, and changeup/Right are the previously observed groups to inspect, not new independent confirmation. Compare A–D **within this new run** if coverage changes; do not attribute between-run sample differences to new features.
+
+Additional outputs are `fitted_acceleration_audit.csv`, `fitted_pitch_features.csv`, and the `Fitted Audit` workbook sheet. The pitch feature CSV retains original identifiers and intermediate calculations for coordinate and unit checks. Check coverage, sign correlations, negative drag counts, and near-zero orthogonality residuals before interpreting performance.
 
 ## Interpret the results
 
@@ -59,7 +81,7 @@ Each run writes its own directory, preserving previous comparisons and avoiding 
 - `paired_predictions.csv`: common-sample raw/calibrated/neutral predictions with prepared row indices and original pitch identifiers where available.
 - `development_raw_metrics.csv` and `pitcher_folds.csv`: reproducible development evidence.
 - `acceleration_experiment.json`: feature definitions, data hashes, settings, source definitions, development choice, limitations, and status.
-- `acceleration_research_models.joblib`: all four research models, calibrators, and final training angle adjusters.
+- `acceleration_research_models.joblib`: all enabled research models, calibrators, and final training angle adjusters.
 - `acceleration_logloss.png`: overview of raw comparison log loss.
 
 All player-level data and generated outputs remain excluded from Git. The experiment does not overwrite the original score/report artifacts or automatically promote a winning variant.
@@ -68,4 +90,4 @@ All player-level data and generated outputs remain excluded from Git. The experi
 
 The loader prefers `MyPitchType`, then fills absent/blank labels from `TaggedPitchType`, then `AutoPitchType`. Nonblank reviewed labels are never overridden; unsupported reviewed labels still follow the existing eligibility exclusions. If no pitch-type source exists, the loader lists the available columns and stops with an actionable error.
 
-Fallback classifications produce an explicit warning. The original validation workbook's data audit and the experiment's `Data Audit` sheet and provenance JSON record source counts. The four variants still use the same classifications and samples within a run, but results from an automatically tagged workbook should not be treated as directly interchangeable with earlier manually classified results. Review labels before publication.
+Fallback classifications produce an explicit warning. The original validation workbook's data audit and the experiment's `Data Audit` sheet and provenance JSON record source counts. All enabled variants still use the same classifications and samples within a run, but results from an automatically tagged workbook should not be treated as directly interchangeable with earlier manually classified results. Review labels before publication.

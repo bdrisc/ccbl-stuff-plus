@@ -177,3 +177,5 @@ The data used in this project is proprietary and is not included in the public r
 The notebook includes an optional paired comparison of the current movement features, equivalent acceleration features, and their combination. A fourth variant adds only flight time as a timing control. The experiment uses documented TrackMan `ZoneTime`, identical pitcher-held-out folds and comparison samples, paired uncertainty intervals, and separate research outputs. It does not automatically replace published Stuff+ scores.
 
 [Run and interpret the acceleration experiment](docs/acceleration-experiment.md).
+
+The next acceleration comparison adds fitted transverse acceleration from legacy TrackMan `ax0/ay0/az0` and velocity fields, plus a flight-time/deceleration control. `INCLUDE_FITTED_ACCELERATION = True` runs seven variants on one common sample; see [the experiment guide](docs/acceleration-experiment.md) for inputs and interpretation.
